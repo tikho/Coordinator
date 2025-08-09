@@ -1,0 +1,7 @@
+aiogram==3.21.0
+google-api-python-client==2.107.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.1.0
+mail-parser==4.1.4
+IMAPClient==3.0.1
+python-dotenv==1.1.1
