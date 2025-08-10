@@ -47,21 +47,13 @@ async def check_mails_task(bot: Bot, chat_id: int):
                 # escaped_company_domain = company_domain.replace('.', r'\.')  # Экранируем все точки
                 # escaped_to_email = to_email.replace('.', r'\.')
 
-                to_email = gpt_markdown_to_telegram_html(to_email)
-                company_domain = gpt_markdown_to_telegram_html(company_domain)
-                time_received = gpt_markdown_to_telegram_html(time_received)
-                code = gpt_markdown_to_telegram_html(code)
+            to_email = gpt_markdown_to_telegram_html(to_email)
+            company_domain = gpt_markdown_to_telegram_html(company_domain)
+            time_received = gpt_markdown_to_telegram_html(time_received)
+            # ВАЖНО: payload_html уже готовый HTML (код ИЛИ ссылка) — не экранируем!
+            text = f"{to_email}\n{company_domain} {time_received}\n\n{payload_html}"
 
-                await bot.send_message(
-                    chat_id=chat_id, 
-                    text=(
-                        f"{to_email}\n"
-                        f"{company_domain} {time_received}\n"
-                        f"\n"
-                        f"<code>{code}</code>"
-                        ),
-                        parse_mode="HTML"
-                    )
+            await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
         except Exception:
             logging.exception("Ошибка в check_mails_task")
         await asyncio.sleep(60)  # Пауза между проверками
