@@ -7,14 +7,16 @@ from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardRemove
 import re
 import html
-
-from config import TG_BOT_TOKEN, CHAT_ID
+import json, os, time
+import requests
+from config import TG_BOT_TOKEN, CHAT_ID, OPENAI_API_KEY
 
 logging.basicConfig(level=logging.INFO)
 
 # Инициализация бота и диспетчера
 bot = Bot(token=TG_BOT_TOKEN)
 dp = Dispatcher(bot=bot)
+
 
 @dp.message(Command("start"))
 async def start_cmd(message: Message):
@@ -36,27 +38,25 @@ async def check_mails_task(bot: Bot, chat_id: int):
         try:
 
             gmail_results = check_gmail_mail()
-            # yahoo_results = check_yahoo_mail('your_yahoo_email', 'your_password')
+            yahoo_results = check_yahoo_mail()
 
             # Логика отправки сообщений в чат с кодами
             # for result in gmail_results + yahoo_results:
-            for result in gmail_results:
-                to_email, company_domain, time_received, code = result
+            for result in gmail_results + yahoo_results:
+                to_email, company_domain, time_received, payload_html = result
                 logging.info('sending message')
 
-                # escaped_company_domain = company_domain.replace('.', r'\.')  # Экранируем все точки
-                # escaped_to_email = to_email.replace('.', r'\.')
-
-            to_email = gpt_markdown_to_telegram_html(to_email)
-            company_domain = gpt_markdown_to_telegram_html(company_domain)
-            time_received = gpt_markdown_to_telegram_html(time_received)
-            # ВАЖНО: payload_html уже готовый HTML (код ИЛИ ссылка) — не экранируем!
-            text = f"{to_email}\n{company_domain} {time_received}\n\n{payload_html}"
-
-            await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
+                to_email = gpt_markdown_to_telegram_html(to_email)
+                company_domain = gpt_markdown_to_telegram_html(company_domain)
+                time_received = gpt_markdown_to_telegram_html(time_received)
+                # ВАЖНО: payload_html уже готовый HTML (код ИЛИ ссылка) — не экранируем!
+                text = f"{to_email}\n{company_domain} {time_received}\n\n{payload_html}"
+                logging.info(f"text: {text}")
+                
+                # await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
         except Exception:
             logging.exception("Ошибка в check_mails_task")
-        await asyncio.sleep(60)  # Пауза между проверками
+        await asyncio.sleep(30)  # Пауза между проверками
 
 
 # =====TG-MARKDOWN

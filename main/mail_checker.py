@@ -1,5 +1,5 @@
 import base64 
-import imaplib, email, re
+import imaplib, email, re, html
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -9,61 +9,26 @@ import pickle
 import logging
 from datetime import datetime, timedelta
 import pytz
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 from typing import Optional, Tuple
+import json, os, time
+import requests
+from config import OPENAI_API_KEY
+from gpt_call import analyze_email_with_ai
+import mailparser
 
-
-from config import TG_BOT_TOKEN, GMAIL_CLIENT_SECRET_FILE, GMAIL_CREDENTIALS_FILE
-
+from config import (
+    TG_BOT_TOKEN, 
+    GMAIL_CLIENT_SECRET_FILE, 
+    GMAIL_CREDENTIALS_FILE,
+    YAHOO_EMAIL,
+    YAHOO_APP_PASSWORD
+)
 
 CODE_REGEX = re.compile(r"\b\d{6,8}\b")
 
 # Список одобренных компаний (от которых будем проверять коды)
 APPROVED_COMPANIES = ["google.com", "openai.com", "yahoo.com", "dropbox.com","anthropic.com", "magnific.ai", "figma.com", "runpod.io"]
-
-A_TAG_REGEX = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', re.IGNORECASE|re.DOTALL)
-SIGNIN_ANCHOR_RE = re.compile(r"sign\s*in\s*to\s+(.+)", re.IGNORECASE)
-URL_REGEX = re.compile(r"https?://[^\s<>\]\)\"']+", re.IGNORECASE)
-
-def etld_plus_one(domain: str) -> str:
-    domain = (domain or "").rstrip(">").lower()
-    parts = domain.split(".")
-    return ".".join(parts[-2:]) if len(parts) >= 2 else domain
-
-def find_signin_link_in_html(html_text: str) -> Optional[Tuple[str, str]]:
-    """Ищем <a ...>...</a>, где внутренний текст содержит Sign in to ... Возвращаем (service_name, url)."""
-    if not html_text:
-        return None
-    for href, inner in A_TAG_REGEX.findall(html_text):
-        # чистим внутренний текст от тегов, ужимаем пробелы
-        inner_text = re.sub("<.*?>", "", inner)
-        inner_text = " ".join(inner_text.split())
-        m = SIGNIN_ANCHOR_RE.search(inner_text)
-        if not m:
-            continue
-        service = m.group(1).strip().strip(".:!- ")
-        if not href.lower().startswith("http"):
-            continue
-        host = etld_plus_one(urlparse(href).netloc)
-        if host in APPROVED_COMPANIES:
-            return (service, href)
-    return None
-
-def find_signin_link_in_text(plain_text: str) -> Optional[Tuple[str, str]]:
-    """В plain тексте ищем Sign in to X и первый URL в пределах 200 символов справа от фразы."""
-    if not plain_text:
-        return None
-    for m in SIGNIN_ANCHOR_RE.finditer(plain_text):
-        service = m.group(1).strip().strip(".:!- ")
-        window = plain_text[m.end(): m.end()+200]
-        u = URL_REGEX.search(window)
-        if not u:
-            continue
-        url = u.group(0)
-        host = etld_plus_one(urlparse(url).netloc)
-        if host in APPROVED_COMPANIES:
-            return (service, url)
-    return None
 
 
 # Функция для получения основного домена из email (игнорируем поддомены)
@@ -76,17 +41,9 @@ def get_main_domain_from_email(email: str):
     main_domain = ".".join(domain.split('.')[-2:])  # Берем последние два сегмента (например, openai.com, google.com)
     return main_domain
 
-def parse_code_from_email(body: str):
-    match = CODE_REGEX.search(body)
-    if match:
-        code = match.group(0)
-        # Проверяем, не является ли код из списка игнорируемых
-        return code
-    return None
-
-def mark_message_as_read(service, message_id):
+def mark_message_as_read(gmail, message_id):
     """Отмечаем письмо как прочитанное"""
-    message = service.users().messages().modify(
+    gmail.users().messages().modify(
         userId="me", id=message_id,
         body={"removeLabelIds": ["UNREAD"]}
     ).execute()
@@ -101,7 +58,7 @@ def authenticate_gmail():
         logging.info("authenticating gmail with " + GMAIL_CREDENTIALS_FILE)
         with open(GMAIL_CREDENTIALS_FILE, 'rb') as token:
             creds = pickle.load(token)
-            logging.info(creds)
+            # logging.info(creds)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -114,15 +71,15 @@ def authenticate_gmail():
         with open(GMAIL_CREDENTIALS_FILE, 'wb') as token:
             pickle.dump(creds, token)
 
-    service = build('gmail', 'v1', credentials=creds)
+    gmail = build('gmail', 'v1', credentials=creds)
     logging.info("authenticated gmail")
-    return service
+    return gmail
 
 
 
 def check_gmail_mail():
     logging.info("checking gmail")
-    service = authenticate_gmail()
+    gmail = authenticate_gmail()
     results = []
 
     # Используем q="newer_than:1d is:unread" для фильтрации по письмам за последний день, которые не прочитаны
@@ -130,7 +87,7 @@ def check_gmail_mail():
 
     try:
         # Получаем письма за последний день
-        resp = service.users().messages().list(
+        resp = gmail.users().messages().list(
             userId='me', labelIds=['INBOX'], q=query
         ).execute()
     except HttpError as error:
@@ -170,53 +127,54 @@ def check_gmail_mail():
 
     for msg in resp['messages']:
         msg_id = msg['id']
-        m = service.users().messages().get(userId='me', id=msg_id).execute()
-        payload = m.get('payload', {})
-        headers = payload.get('headers', [])
-        from_email = next((h['value'] for h in headers if h['name'] == 'From'), "")
-        to_email   = next((h['value'] for h in headers if h['name'] == 'To'), "")
-        internal_ts = int(m.get('internalDate', "0")) // 1000
+        # fetch raw + parse
+        m = gmail.users().messages().get(userId='me', id=msg_id, format='raw').execute()
+        raw_b64 = m.get('raw', '')
+        raw_bytes = base64.urlsafe_b64decode(raw_b64.encode())
 
-        # Белый список по eTLD+1 отправителя
+        plain, html_body, links, from_email, to_email, date_dt = parse_email_with_mailparser(raw_bytes)
+
+        # whitelist by sender domain
         domain = get_main_domain_from_email(from_email)
         if domain not in APPROVED_COMPANIES:
             continue
 
-        # Достаём и текст, и HTML
-        text_body, html_body = collect_bodies(payload)
-        if not text_body and not html_body:
-            # бывает "single-part" без parts
-            bdata = payload.get('body', {}).get('data')
-            if bdata:
-                text_body = b64_to_text(bdata)
+        # time_received from letter date, fallback to internalDate
+        internal_ts = int(m.get('internalDate', "0")) // 1000
+        if date_dt:
+            if date_dt.tzinfo is None:
+                date_dt = date_dt.replace(tzinfo=pytz.UTC)
+            time_received = date_dt.astimezone(pytz.timezone('Europe/Moscow')).strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            dt = datetime.utcfromtimestamp(internal_ts).astimezone(pytz.timezone('Europe/Moscow'))
+            time_received = dt.strftime('%Y-%m-%d %H:%M:%S')
 
-        # 1) пытаемся вытащить код (из текста и "очищенного" HTML)
-        code = parse_code_from_email(text_body)
-        if not code and html_body:
-            html_stripped = re.sub("<.*?>", " ", html_body)
-            code = parse_code_from_email(html_stripped)
+        # build anchors-only for AI
+        anchors = "\n".join(f'<a href="{u}">{u}</a>' for u in links)
 
-        # 2) если кода нет — пробуем найти sign-in ссылку по правилу "Sign in to ..."
-        service_name = None
-        signin_url = None
-        if not code:
-            hit = find_signin_link_in_html(html_body) or find_signin_link_in_text(text_body)
+        # AI first
+        ai = analyze_email_with_ai(plain, anchors)
+        code = (ai.get("code") or "").strip() or None
+        signin_url = (ai.get("signin_url") or "").strip() or None
+        service_label = (ai.get("service") or "").strip() or None
+
+        # fallbacks
+        if not code and not signin_url:
+            code = extract_code(plain)
+        if not code and not signin_url:
+            hit = find_signin_link_if_present(html_body, plain)
             if hit:
-                service_name, signin_url = hit
+                service_label, signin_url = hit
 
-        # если ничего не нашли — к следующему письму
+        # Skip if still nothing
         if not code and not signin_url:
             continue
 
-        # готовим время (МСК)
-        dt = datetime.utcfromtimestamp(internal_ts).astimezone(pytz.timezone('Europe/Moscow'))
-        time_received = dt.strftime('%Y-%m-%d %H:%M:%S')
-
-        # 4‑я строка сообщения: либо код, либо кликабельная ссылка
+        # Payload
         if code:
             payload_html = f"<code>{html.escape(code)}</code>"
         else:
-            safe_service = html.escape(service_name or "Service")
+            safe_service = html.escape(service_label or "Service")
             safe_url = html.escape(signin_url)
             payload_html = f"<a href=\"{safe_url}\">Sign in to {safe_service}</a>"
 
@@ -225,7 +183,7 @@ def check_gmail_mail():
 
         # помечаем прочитанным, чтобы не дублировать
         try:
-            mark_message_as_read(service, msg_id)
+            mark_message_as_read(gmail, msg_id)
         except HttpError as e:
             logging.warning("mark read failed for %s: %s", msg_id, e)
 
@@ -233,26 +191,259 @@ def check_gmail_mail():
 
 
 # Yahoo Mail IMAP Authentication
-def check_yahoo_mail(user, password):
-    mail = imaplib.IMAP4_SSL("imap.mail.yahoo.com")
-    mail.login(user, password)
-    mail.select("inbox")
-    status, data = mail.search(None, 'UNSEEN')
-    ids = data[0].split()
+def check_yahoo_mail():
+    """Check Yahoo Mail for new messages using IMAP."""
+    logging.info("checking yahoo mail")
+    if not YAHOO_EMAIL or not YAHOO_APP_PASSWORD:
+        logging.warning("Yahoo Mail credentials not configured")
+        return []
+
     results = []
-    for mail_id in ids:
-        status, msg_data = mail.fetch(mail_id, "(RFC822)")
-        for response_part in msg_data:
-            if isinstance(response_part, tuple):
-                msg = email.message_from_bytes(response_part[1])
-                body = ""
-                if msg.is_multipart():
-                    for part in msg.walk():
-                        if part.get_content_type() == "text/plain":
-                            body += part.get_payload(decode=True).decode()
-                else:
-                    body = msg.get_payload(decode=True).decode()
-                code = parse_code_from_email(body)
-                if code:
-                    results.append((msg["From"], msg["Subject"], code))
+    try:
+        mail = imaplib.IMAP4_SSL("imap.mail.yahoo.com")
+        mail.login(YAHOO_EMAIL, YAHOO_APP_PASSWORD)
+        mail.select("inbox")  # read-write
+        
+        # Search for unread messages from the last 24 hours
+        date = (datetime.now() - timedelta(days=1)).strftime("%d-%b-%Y")
+        status, data = mail.search(None, f'(UNSEEN SINCE {date})')
+        
+        if status != 'OK':
+            logging.error("Failed to search Yahoo Mail")
+            return results
+
+        for num in data[0].split():
+            status, msg_data = mail.fetch(num, '(BODY.PEEK[])')  # avoid auto \Seen on fetch
+            if status != 'OK':
+                continue
+
+            # After fetching RFC822 (BODY.PEEK[])
+            email_body = msg_data[0][1]  # raw RFC822 bytes
+            plain, html_body, links = parse_email_with_mailparser(email_body)
+
+            # Get sender's email
+            from_email = email_msg['from']
+            to_email = email_msg['to']
+            
+            # Extract domain and check if it's approved
+            domain = get_main_domain_from_email(from_email)
+            # logging.info("domain: " + domain)
+            if domain not in APPROVED_COMPANIES:
+                continue
+
+            # Get message time in Moscow timezone
+            date_tuple = email.utils.parsedate_tz(email_msg['date'])
+            if date_tuple:
+                local_date = datetime.fromtimestamp(
+                    email.utils.mktime_tz(date_tuple)
+                ).astimezone(pytz.timezone('Europe/Moscow'))
+                time_received = local_date.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                time_received = datetime.now(pytz.timezone('Europe/Moscow')).strftime('%Y-%m-%d %H:%M:%S')
+
+            # Extract message body
+            text_body = ""
+            html_body = ""
+            
+            if email_msg.is_multipart():
+                for part in email_msg.walk():
+                    if part.get_content_type() == "text/plain":
+                        text_body += part.get_payload(decode=True).decode('utf-8', 'ignore')
+                    elif part.get_content_type() == "text/html":
+                        html_body += part.get_payload(decode=True).decode('utf-8', 'ignore')
+            else:
+                text_body = email_msg.get_payload(decode=True).decode('utf-8', 'ignore')
+
+            # logging.info(f"Yahoo: text_body: {text_body}")
+            # logging.info(f"Yahoo: html_body: {html_body}")
+
+            # Derive plain text if needed
+            plain = html_to_visible_text(html_body)
+            links_html = extract_links_as_anchors(html_body)
+
+            logging.info("plain text: " + plain + " + LINKS: " + links_html)
+
+            # 1) AI first
+            anchors = "\n".join(f'<a href="{u}">{u}</a>' for u in links)
+            ai = analyze_email_with_ai(plain, anchors)
+            # logging.info("got from gpt: %r", ai)
+            code = (ai.get("code") or "").strip() or None
+            signin_url = (ai.get("signin_url") or "").strip() or None
+            service_label = (ai.get("service") or "").strip() or None
+
+            # 2) Fallbacks only if AI didn't find anything
+            if not code and not signin_url:
+                code = extract_code(plain)
+            if not code and not signin_url:
+                hit = find_signin_link_if_present(html_body, plain)
+                if hit:
+                    service_label, signin_url = hit
+
+            # Skip if still nothing
+            if not code and not signin_url:
+                continue
+
+            # Payload
+            if code:
+                payload_html = f"<code>{html.escape(code)}</code>"
+            else:
+                safe_service = html.escape(service_label or "Service")
+                safe_url = html.escape(signin_url)
+                payload_html = f"<a href=\"{safe_url}\">Sign in to {safe_service}</a>"
+
+            # Add to results
+            results.append((to_email, domain, time_received, payload_html))
+
+            # Explicitly mark as read only for processed messages
+            try:
+                mail.store(num, '+FLAGS', '\\Seen')
+                logging.info("Yahoo: marked message %s as read", num.decode() if isinstance(num, bytes) else str(num))
+            except Exception as e:
+                logging.warning("Yahoo: failed to mark %s as read: %s", num, e)
+
+        mail.logout()
+    except Exception as e:
+        logging.error(f"Error checking Yahoo Mail: {str(e)}")
+        return results
+
     return results
+
+def html_to_visible_text(html_body: str) -> str:
+    if not html_body:
+        return ""
+    # Remove scripts/styles
+    html_clean = re.sub(r"<script[\s\S]*?</script>", " ", html_body, flags=re.IGNORECASE)
+    html_clean = re.sub(r"<style[\s\S]*?</style>", " ", html_clean, flags=re.IGNORECASE)
+    # Line breaks for common block boundaries
+    html_clean = re.sub(r"(?i)<br\s*/?>", "\n", html_clean)
+    html_clean = re.sub(r"(?i)</(p|div|li|tr|h[1-6])>", "\n", html_clean)
+    # Strip tags
+    text = re.sub(r"<.*?>", " ", html_clean)
+    # Unescape HTML entities and normalize spaces
+    text = html.unescape(text).replace("\u00A0", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n", text)
+    return text.strip()
+
+def extract_code(text: str) -> Optional[str]:
+    if not text:
+        return None
+    m = CODE_REGEX.search(text)
+    return m.group(0) if m else None
+
+SIGNIN_PRESENT_RE = re.compile(r"sign[\s\u00A0]*in[\s\u00A0]*to", re.IGNORECASE)
+QP_A_HREF_RE = re.compile(r"<a\b[^>]*?\bhref\s*=\s*(?:=3D)?(['\"])(.+?)\1", re.IGNORECASE | re.DOTALL)
+EMBEDDED_URL_RE = re.compile(r"https?://[^\s\"'>]+", re.IGNORECASE)
+
+def extract_first_qp_href(html_body: str) -> Optional[str]:
+    if not html_body:
+        return None
+    # normalize quoted‑printable soft breaks and '=3D'
+    s = html_body.replace("=\r\n", "").replace("=\n", "").replace("=3D", "=")
+    # unescape HTML entities
+    s = html.unescape(s)
+    # find first <a ... href=3D'...'> or "..."
+    m = QP_A_HREF_RE.search(s)
+    if not m:
+        return None
+    raw = m.group(2)
+    # decode percent-encoding once or twice; also try to pull embedded https URL
+    dec1 = unquote(raw)
+    dec2 = unquote(dec1)
+    u = EMBEDDED_URL_RE.search(dec2) or EMBEDDED_URL_RE.search(dec1) or EMBEDDED_URL_RE.search(raw)
+    return u.group(0) if u else None
+
+def find_signin_link_if_present(html_body: str, plain_text: str) -> Optional[Tuple[str, str]]:
+    # If the letter mentions "Sign in to ..." anywhere, take first href from HTML
+    has_phrase = False
+    if plain_text and SIGNIN_PRESENT_RE.search(plain_text):
+        has_phrase = True
+    if not has_phrase and html_body:
+        stripped = re.sub(r"<.*?>", " ", html_body)
+        stripped = html.unescape(stripped).replace("\u00A0", " ")
+        stripped = " ".join(stripped.split())
+        has_phrase = bool(SIGNIN_PRESENT_RE.search(stripped))
+    if not has_phrase:
+        return None
+
+    href = extract_first_qp_href(html_body or "")
+    if not href or not href.lower().startswith(("http://", "https://")):
+        return None
+
+    host = urlparse(href).netloc.lower()
+    host = ".".join(host.split(".")[-2:])
+    if host not in APPROVED_COMPANIES:
+        return None
+    return (host, href)
+
+P_TAG_RE = re.compile(r"(?is)<p\b[^>]*>.*?</p>")
+A_TAG_WITH_HREF_RE = re.compile(r"(?is)<a\b[^>]*?\bhref\s*=\s*(?:=3D)?(['\"])(.+?)\1[^>]*>.*?</a>")
+
+def extract_p_and_a_html(html_body: str) -> str:
+    if not html_body:
+        return ""
+    # normalize quoted‑printable artifacts and entities once
+    s = html_body.replace("=\r\n", "").replace("=\n", "").replace("=3D", "=")
+    s = html.unescape(s)
+    parts = []
+    parts.extend(P_TAG_RE.findall(s))
+    parts.extend(A_TAG_WITH_HREF_RE.findall(s) and [m.group(0) for m in A_TAG_WITH_HREF_RE.finditer(s)] or [])
+    return "\n".join(parts)
+
+def visible_text_from_p_only(html_body: str) -> str:
+    # Use only <p> blocks for plain text if no text/plain
+    if not html_body:
+        return ""
+    s = html_body.replace("=\r\n", "").replace("=\n", "").replace("=3D", "=")
+    s = html.unescape(s)
+    p_blocks = P_TAG_RE.findall(s)
+    if not p_blocks:
+        return ""
+    text = " ".join(re.sub(r"<.*?>", " ", b) for b in p_blocks)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n", text)
+    return text.strip()
+
+# Extract only visible text and only <a> links
+
+QP_A_HREF_FULL_RE = re.compile(r'(?is)<a\b[^>]*?\bhref\s*=\s*(?:=3D)?([\'"])(.+?)\1[^>]*>(.*?)</a>')
+
+def extract_links_as_anchors(html_body: str) -> str:
+    if not html_body:
+        return ""
+    s = html_body.replace("=\r\n", "").replace("=\n", "").replace("=3D", "=")
+    s = html.unescape(s)
+    anchors = []
+    for m in QP_A_HREF_FULL_RE.finditer(s):
+        raw_href = m.group(2)
+        inner = m.group(3) or ""
+        # normalize href
+        dec1 = unquote(raw_href)
+        dec2 = unquote(dec1)
+        href = dec2 or dec1 or raw_href
+        # visible text
+        text = html.unescape(re.sub(r"<.*?>", " ", inner)).strip()
+        text = re.sub(r"\s+", " ", text)
+        if href and href.lower().startswith(("http://", "https://")):
+            anchors.append(f'<a href="{href}">{text}</a>')
+    return "\n".join(anchors)
+
+def parse_email_with_mailparser(raw_bytes: bytes) -> tuple[str, str, list[str], str, str, Optional[datetime]]:
+    mp = mailparser.parse_from_bytes(raw_bytes)
+
+    text_parts = [t for t in (mp.text_plain or []) if t]
+    plain_text = "\n".join(text_parts).strip()
+
+    html_parts = [h for h in (mp.text_html or []) if h]
+    html_body = "\n".join(html_parts).strip()
+
+    if not plain_text and html_body:
+        plain_text = html_to_visible_text(html_body)
+
+    links = mp.urls or []
+
+    from_email = (mp.from_[0][1] if mp.from_ else "")  # (name, email)
+    to_email = (mp.to[0][1] if mp.to else "")
+    date_dt = mp.date  # datetime or None
+
+    return plain_text, html_body, links, from_email, to_email, date_dt
