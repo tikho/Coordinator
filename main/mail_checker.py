@@ -25,7 +25,11 @@ from config import (
     YAHOO_APP_PASSWORD
 )
 
+# simple 6–8 digit codes
 CODE_REGEX = re.compile(r"\b\d{6,8}\b")
+# gate words
+CODE_WORD_RE = re.compile(r"\b(code|код)\b", re.IGNORECASE)
+SIGNIN_PRESENT_RE = re.compile(r"sign[\s\u00A0]*in[\s\u00A0]*to", re.IGNORECASE)
 
 # Список одобренных компаний (от которых будем проверять коды)
 APPROVED_COMPANIES = ["google.com", "openai.com", "yahoo.com", "dropbox.com","anthropic.com", "magnific.ai", "figma.com", "runpod.io"]
@@ -152,16 +156,21 @@ def check_gmail_mail():
         # build anchors-only for AI
         anchors = "\n".join(f'<a href="{u}">{u}</a>' for u in links)
 
-        # AI first
-        ai = analyze_email_with_ai(plain, anchors)
-        code = (ai.get("code") or "").strip() or None
-        signin_url = (ai.get("signin_url") or "").strip() or None
-        service_label = (ai.get("service") or "").strip() or None
+        # ai = analyze_email_with_ai(plain, anchors)
 
-        # fallbacks
-        if not code and not signin_url:
-            code = extract_code(plain)
-        if not code and not signin_url:
+        # Build human-visible plain text
+        plain = plain if 'plain' in locals() and plain else (text_body or (html_to_visible_text(html_body) if html_body else ""))
+
+        code = None
+        signin_url = None
+        service_label = None
+
+        # 1) Only check for code if the letter mentions "code" or "код"
+        if CODE_WORD_RE.search(plain):
+            code = extract_code_smart(plain)
+
+        # 2) Only check for link if the letter mentions "sign in to"
+        if not code and SIGNIN_PRESENT_RE.search(plain):
             hit = find_signin_link_if_present(html_body, plain)
             if hit:
                 service_label, signin_url = hit
@@ -205,7 +214,7 @@ def check_yahoo_mail():
         mail.select("inbox")  # read-write
         
         # Search for unread messages from the last 24 hours
-        date = (datetime.now() - timedelta(days=1)).strftime("%d-%b-%Y")
+        date = (datetime.now() - timedelta(days=2)).strftime("%d-%b-%Y")
         status, data = mail.search(None, f'(UNSEEN SINCE {date})')
         
         if status != 'OK':
@@ -219,62 +228,34 @@ def check_yahoo_mail():
 
             # After fetching RFC822 (BODY.PEEK[])
             email_body = msg_data[0][1]  # raw RFC822 bytes
-            plain, html_body, links = parse_email_with_mailparser(email_body)
+            plain, html_body, links, from_email, to_email, date_dt = parse_email_with_mailparser(email_body)
 
-            # Get sender's email
-            from_email = email_msg['from']
-            to_email = email_msg['to']
-            
-            # Extract domain and check if it's approved
+            # Domain whitelist
             domain = get_main_domain_from_email(from_email)
-            # logging.info("domain: " + domain)
             if domain not in APPROVED_COMPANIES:
                 continue
 
-            # Get message time in Moscow timezone
-            date_tuple = email.utils.parsedate_tz(email_msg['date'])
-            if date_tuple:
-                local_date = datetime.fromtimestamp(
-                    email.utils.mktime_tz(date_tuple)
-                ).astimezone(pytz.timezone('Europe/Moscow'))
-                time_received = local_date.strftime('%Y-%m-%d %H:%M:%S')
+            # Time received
+            if date_dt:
+                if date_dt.tzinfo is None:
+                    date_dt = date_dt.replace(tzinfo=pytz.UTC)
+                time_received = date_dt.astimezone(pytz.timezone('Europe/Moscow')).strftime('%Y-%m-%d %H:%M:%S')
             else:
                 time_received = datetime.now(pytz.timezone('Europe/Moscow')).strftime('%Y-%m-%d %H:%M:%S')
 
-            # Extract message body
-            text_body = ""
-            html_body = ""
-            
-            if email_msg.is_multipart():
-                for part in email_msg.walk():
-                    if part.get_content_type() == "text/plain":
-                        text_body += part.get_payload(decode=True).decode('utf-8', 'ignore')
-                    elif part.get_content_type() == "text/html":
-                        html_body += part.get_payload(decode=True).decode('utf-8', 'ignore')
-            else:
-                text_body = email_msg.get_payload(decode=True).decode('utf-8', 'ignore')
+            # Derive human-visible plain text (Yahoo is often HTML-only)
+            plain = plain if 'plain' in locals() and plain else html_to_visible_text(html_body)
 
-            # logging.info(f"Yahoo: text_body: {text_body}")
-            # logging.info(f"Yahoo: html_body: {html_body}")
+            code = None
+            signin_url = None
+            service_label = None
 
-            # Derive plain text if needed
-            plain = html_to_visible_text(html_body)
-            links_html = extract_links_as_anchors(html_body)
+            # 1) Only check for code if the letter mentions "code" or "код"
+            if CODE_WORD_RE.search(plain):
+                code = extract_code_smart(plain)
 
-            logging.info("plain text: " + plain + " + LINKS: " + links_html)
-
-            # 1) AI first
-            anchors = "\n".join(f'<a href="{u}">{u}</a>' for u in links)
-            ai = analyze_email_with_ai(plain, anchors)
-            # logging.info("got from gpt: %r", ai)
-            code = (ai.get("code") or "").strip() or None
-            signin_url = (ai.get("signin_url") or "").strip() or None
-            service_label = (ai.get("service") or "").strip() or None
-
-            # 2) Fallbacks only if AI didn't find anything
-            if not code and not signin_url:
-                code = extract_code(plain)
-            if not code and not signin_url:
+            # 2) Only check for link if the letter mentions "sign in to"
+            if not code and SIGNIN_PRESENT_RE.search(plain):
                 hit = find_signin_link_if_present(html_body, plain)
                 if hit:
                     service_label, signin_url = hit
@@ -325,13 +306,36 @@ def html_to_visible_text(html_body: str) -> str:
     text = re.sub(r"\n\s*\n+", "\n", text)
     return text.strip()
 
-def extract_code(text: str) -> Optional[str]:
-    if not text:
+def extract_code_smart(plain: str) -> Optional[str]:
+    if not plain:
         return None
-    m = CODE_REGEX.search(text)
-    return m.group(0) if m else None
+    # find all candidates
+    candidates = [(m.group(0), m.start(), m.end()) for m in CODE_REGEX.finditer(plain)]
+    
+    # filter out repeated-digit codes like 000000, 111111, etc.
+    def is_repeated(s: str) -> bool:
+        return len(set(s)) == 1
+    candidates = [c for c in candidates if not is_repeated(c[0])]
+    if not candidates:
+        return None
 
-SIGNIN_PRESENT_RE = re.compile(r"sign[\s\u00A0]*in[\s\u00A0]*to", re.IGNORECASE)
+    # find positions of the keyword "code/код"
+    kw_spans = [m.span() for m in CODE_WORD_RE.finditer(plain)]
+    if not kw_spans:
+        # fallback: pick the longest (prefer 7-8) then earliest
+        candidates.sort(key=lambda x: (-len(x[0]), x[1]))
+        return candidates[0][0]
+
+    # score by min distance to any keyword occurrence, prefer longer codes
+    def score(c):
+        _, s, e = c
+        center = (s + e) // 2
+        dist = min(abs(center - ((ks + ke) // 2)) for ks, ke in kw_spans)
+        # shorter distance better, longer code better
+        return (dist, -len(c[0]), s)
+    candidates.sort(key=score)
+    return candidates[0][0] if candidates else None
+
 QP_A_HREF_RE = re.compile(r"<a\b[^>]*?\bhref\s*=\s*(?:=3D)?(['\"])(.+?)\1", re.IGNORECASE | re.DOTALL)
 EMBEDDED_URL_RE = re.compile(r"https?://[^\s\"'>]+", re.IGNORECASE)
 
