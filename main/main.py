@@ -7,9 +7,8 @@ from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardRemove
 import re
 import html
-import json, os, time
-import requests
-from config import TG_BOT_TOKEN, CHAT_ID, OPENAI_API_KEY
+
+from config import TG_BOT_TOKEN, CHAT_ID
 
 logging.basicConfig(level=logging.INFO)
 
@@ -51,9 +50,8 @@ async def check_mails_task(bot: Bot, chat_id: int):
                 time_received = gpt_markdown_to_telegram_html(time_received)
                 # ВАЖНО: payload_html уже готовый HTML (код ИЛИ ссылка) — не экранируем!
                 text = f"{to_email}\n{company_domain} {time_received}\n\n{payload_html}"
-                logging.info(f"text: {text}")
-                
-                # await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
+                logging.info(text)
+                await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
         except Exception:
             logging.exception("Ошибка в check_mails_task")
         await asyncio.sleep(30)  # Пауза между проверками

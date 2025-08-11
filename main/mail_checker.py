@@ -214,7 +214,7 @@ def check_yahoo_mail():
         mail.select("inbox")  # read-write
         
         # Search for unread messages from the last 24 hours
-        date = (datetime.now() - timedelta(days=2)).strftime("%d-%b-%Y")
+        date = (datetime.now() - timedelta(days=1)).strftime("%d-%b-%Y")
         status, data = mail.search(None, f'(UNSEEN SINCE {date})')
         
         if status != 'OK':
