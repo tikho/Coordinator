@@ -26,13 +26,13 @@ from config import (
 )
 
 # simple 6–8 digit codes
-CODE_REGEX = re.compile(r"\b\d{6,8}\b")
+CODE_REGEX = re.compile(r"\b\d{4,8}\b")
 # gate words
 CODE_WORD_RE = re.compile(r"\b(code|код)\b", re.IGNORECASE)
 SIGNIN_PRESENT_RE = re.compile(r"sign[\s\u00A0]*in[\s\u00A0]*to", re.IGNORECASE)
 
 # Список одобренных компаний (от которых будем проверять коды)
-APPROVED_COMPANIES = ["google.com", "openai.com", "yahoo.com", "dropbox.com","anthropic.com", "magnific.ai", "figma.com", "runpod.io"]
+APPROVED_COMPANIES = ["google.com", "openai.com", "yahoo.com", "dropbox.com","anthropic.com", "magnific.ai", "pstmrk.it", "figma.com", "runpod.io", "timeweb.cloud"]
 
 
 # Функция для получения основного домена из email (игнорируем поддомены)
@@ -140,6 +140,7 @@ def check_gmail_mail():
 
         # whitelist by sender domain
         domain = get_main_domain_from_email(from_email)
+        # logging.info("domain: " + domain)
         if domain not in APPROVED_COMPANIES:
             continue
 
@@ -376,6 +377,7 @@ def find_signin_link_if_present(html_body: str, plain_text: str) -> Optional[Tup
 
     host = urlparse(href).netloc.lower()
     host = ".".join(host.split(".")[-2:])
+
     if host not in APPROVED_COMPANIES:
         return None
     return (host, href)
