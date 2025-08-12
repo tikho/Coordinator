@@ -15,5 +15,5 @@ EXPOSE 8080
 
 # Команда для запуска бота
 CMD ["python", "main/main.py"]
-main/main.py
+/opt/coordinator/main/main.py
 
