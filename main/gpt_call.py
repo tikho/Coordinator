@@ -1,4 +1,3 @@
-# main/mail_checker.py
 import json, os, time
 import requests
 import logging
