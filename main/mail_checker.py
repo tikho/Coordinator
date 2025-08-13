@@ -184,6 +184,8 @@ def check_gmail_mail():
         if code:
             payload_html = f"<code>{html.escape(code)}</code>"
         else:
+            if service_label and service_label.lower() == "pstmrk.it":
+                service_label = domain
             safe_service = html.escape(service_label or "Service")
             safe_url = html.escape(signin_url)
             payload_html = f"<a href=\"{safe_url}\">Sign in to {safe_service}</a>"
@@ -269,6 +271,8 @@ def check_yahoo_mail():
             if code:
                 payload_html = f"<code>{html.escape(code)}</code>"
             else:
+                if service_label and service_label.lower() == "pstmrk.it":
+                    service_label = domain
                 safe_service = html.escape(service_label or "Service")
                 safe_url = html.escape(signin_url)
                 payload_html = f"<a href=\"{safe_url}\">Sign in to {safe_service}</a>"

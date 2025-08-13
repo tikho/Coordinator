@@ -51,7 +51,7 @@ async def check_mails_task(bot: Bot, chat_id: int):
                 # ВАЖНО: payload_html уже готовый HTML (код ИЛИ ссылка) — не экранируем!
                 text = f"{to_email}\n{company_domain} {time_received}\n\n{payload_html}"
                 logging.info(text)
-                await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
+                # await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
         except Exception:
             logging.exception("Ошибка в check_mails_task")
         await asyncio.sleep(30)  # Пауза между проверками
