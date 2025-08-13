@@ -38,5 +38,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
-            docker-compose down  # Останавливаем старый контейнер
-            docker-compose up --build -d  # Собираем новый контейнер и запускаем его
+            sudo docker stop coordinator-bot
+            sudo docker rm coordinator-bot
+            sudo docker build -t coordinator-bot .
+            sudo docker run -d --name coordinator-bot --restart always coordinator-bot
