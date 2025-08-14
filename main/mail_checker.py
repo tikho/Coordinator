@@ -9,6 +9,7 @@ import pickle
 import logging
 from datetime import datetime, timedelta
 import pytz
+import quopri
 from urllib.parse import urlparse, unquote
 from typing import Optional, Tuple
 import json, os, time
@@ -29,8 +30,18 @@ from config import (
 # simple 6–8 digit codes
 CODE_REGEX = re.compile(r"\b\d{4,8}\b")
 # gate words
-CODE_WORD_RE = re.compile(r"\b(code|код|кодом)\b", re.IGNORECASE)
+CODE_WORD_RE = re.compile(r"\b(code|код|кодом|местоположения)\b", re.IGNORECASE)
 SIGNIN_PRESENT_RE = re.compile(r"sign[\s\u00A0]*in[\s\u00A0]*to", re.IGNORECASE)
+
+# Регулярное выражение для поиска фразы "Подтвердить вход"
+SIGNIN_ANCHOR_RE = re.compile(r"подтвердить\s*вход", re.IGNORECASE)
+
+# Регулярное выражение для поиска всех ссылок <a href="...">
+A_TAG_REGEX = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', re.IGNORECASE|re.DOTALL)
+
+# Функция для декодирования текста, если он закодирован в quoted-printable
+def decode_quoted_printable(text):
+    return quopri.decodestring(text).decode('utf-8', errors='ignore')
 
 # Список одобренных компаний (от которых будем проверять коды)
 APPROVED_COMPANIES = [
@@ -109,12 +120,11 @@ def authenticate_gmail(credentials_file):
 
 
 def check_gmail_mail(credentials_file):
-    logging.info("checking gmail")
     gmail = authenticate_gmail(credentials_file)
     results = []
 
     # Используем q="newer_than:1d is:unread" для фильтрации по письмам за последний день, которые не прочитаны
-    query = "newer_than:2d is:unread"
+    query = "newer_than:1d is:unread"
 
     try:
         # Получаем письма за последний день
@@ -193,12 +203,13 @@ def check_gmail_mail(credentials_file):
         signin_url = None
         service_label = None
 
-        # 1) Only check for code if the letter mentions "code" or "код"
+        # 1) Only check for code if the letter mentions "code" or "код" or "подтвердите вход"
         if CODE_WORD_RE.search(plain):
+            logging.info("found mail")
             code = extract_code_smart(plain)
 
         # 2) Only check for link if the letter mentions "sign in to"
-        if not code and SIGNIN_PRESENT_RE.search(plain):
+        if not code and SIGNIN_PRESENT_RE.search(plain) or SIGNIN_ANCHOR_RE.search(plain):
             hit = find_signin_link_if_present(html_body, plain)
             if hit:
                 service_label, signin_url = hit
@@ -211,9 +222,10 @@ def check_gmail_mail(credentials_file):
         if code:
             payload_html = f"<code>{html.escape(code)}</code>"
         else:
-            if service_label and service_label.lower() == "pstmrk.it":
-                service_label = domain
-            safe_service = html.escape(service_label or "Service")
+            # if service_label and service_label.lower() in ("pstmrk.it", "Подтвердить вход"):
+            #     service_label = domain
+            # safe_service = html.escape(service_label or "Service")
+            safe_service = domain
             safe_url = html.escape(signin_url)
             payload_html = f"<a href=\"{safe_url}\">Sign in to {safe_service}</a>"
 
@@ -392,6 +404,7 @@ def extract_first_qp_href(html_body: str) -> Optional[str]:
 def find_signin_link_if_present(html_body: str, plain_text: str) -> Optional[Tuple[str, str]]:
     # If the letter mentions "Sign in to ..." anywhere, take first href from HTML
     has_phrase = False
+    logging.info("checking for sign in link")
     if plain_text and SIGNIN_PRESENT_RE.search(plain_text):
         has_phrase = True
     if not has_phrase and html_body:
@@ -400,7 +413,15 @@ def find_signin_link_if_present(html_body: str, plain_text: str) -> Optional[Tup
         stripped = " ".join(stripped.split())
         has_phrase = bool(SIGNIN_PRESENT_RE.search(stripped))
     if not has_phrase:
+        # logging.info("html_body: " + html_body)
+        for href, inner in A_TAG_REGEX.findall(html_body):
+            # inner_text = decode_quoted_printable(inner)
+            inner_text = re.sub("<.*?>", "", inner)  # Убираем все HTML-теги
+            inner_text = " ".join(inner_text.split())  # Убираем лишние пробелы
+            if SIGNIN_ANCHOR_RE.search(inner_text):  # Проверяем на фразу "Подтвердить вход"
+                return (inner_text, href)
         return None
+        
 
     href = extract_first_qp_href(html_body or "")
     if not href or not href.lower().startswith(("http://", "https://")):
