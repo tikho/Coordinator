@@ -6,39 +6,41 @@ on:
       - main  # Запуск при пуше в основную ветку
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2  # Получаем код из репозитория
+        uses: actions/checkout@v3
+        # with:
+        #   fetch-depth: 0  # Берём всю историю
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1  # Настроим поддержку Buildx
-
-      - name: Build Docker image
-        run: |
-          docker build -t coordinator-bot .  # Строим Docker-образ
+        uses: docker/setup-buildx-action@v2
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v1  # Логинимся в Docker Hub
+        uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Push Docker image to Docker Hub
-        run: |
-          docker tag coordinator-bot ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
-          docker push ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest  # Отправляем образ в Docker Hub
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
 
-      - name: SSH to VPS and restart bot
-        uses: appleboy/ssh-action@v0.1.6  # Переходим на сервер по SSH
+      - name: SSH to VPS and update container
+        uses: appleboy/ssh-action@v0.1.6
         with:
           host: ${{ secrets.VPS_IP }}
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
-            sudo docker stop coordinator-bot
-            sudo docker rm coordinator-bot
-            sudo docker build -t coordinator-bot .
-            sudo docker run -d --name coordinator-bot --restart always coordinator-bot
+            sudo docker stop coordinator-bot || true
+            sudo docker rm coordinator-bot || true
+            sudo docker pull ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
+            sudo docker run -d \
+              --name coordinator-bot \
+              --restart always \
+              ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
