@@ -59,7 +59,8 @@ APPROVED_COMPANIES = [
     "opencreator.io",
     "midjourney.com",
     "discord.com",
-    "atlassian.com"
+    "atlassian.com",
+    "gptunnel.ru"
 ]
 
 
