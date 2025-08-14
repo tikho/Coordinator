@@ -12,8 +12,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-        # with:
-        #   fetch-depth: 0  # Берём всю историю
+        with:
+          fetch-depth: 0  # Берём всю историю
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
