@@ -22,17 +22,34 @@ from config import (
     GMAIL_CLIENT_SECRET_FILE, 
     GMAIL_CREDENTIALS_FILE,
     YAHOO_EMAIL,
-    YAHOO_APP_PASSWORD
+    YAHOO_APP_PASSWORD,
+    GMAIL_ACCOUNTS
 )
 
 # simple 6–8 digit codes
 CODE_REGEX = re.compile(r"\b\d{4,8}\b")
 # gate words
-CODE_WORD_RE = re.compile(r"\b(code|код)\b", re.IGNORECASE)
+CODE_WORD_RE = re.compile(r"\b(code|код|кодом)\b", re.IGNORECASE)
 SIGNIN_PRESENT_RE = re.compile(r"sign[\s\u00A0]*in[\s\u00A0]*to", re.IGNORECASE)
 
 # Список одобренных компаний (от которых будем проверять коды)
-APPROVED_COMPANIES = ["google.com", "openai.com", "yahoo.com", "dropbox.com","anthropic.com", "magnific.ai", "pstmrk.it", "figma.com", "runpod.io", "timeweb.cloud"]
+APPROVED_COMPANIES = [
+    "google.com",
+    "openai.com",
+    "yahoo.com",
+    "dropbox.com",
+    "anthropic.com",
+    "magnific.ai",
+    "pstmrk.it",
+    "figma.com",
+    "runpod.io",
+    "timeweb.cloud",
+    "recraft.ai",
+    "opencreator.io",
+    "midjourney.com",
+    "discord.com",
+    "atlassian.com"
+]
 
 
 # Функция для получения основного домена из email (игнорируем поддомены)
@@ -54,40 +71,50 @@ def mark_message_as_read(gmail, message_id):
     print(f"Message with ID: {message_id} marked as read.")
 
 
+def check_all_gmail_accounts():
+    all_results = []
+    for acc in GMAIL_ACCOUNTS:
+        results = check_gmail_mail(credentials_file=acc["credentials"])
+        logging.info("checked gmail: " + acc["name"] + " with results:")
+        logging.info("Items: %r", results) 
+        all_results.extend(results)
+    return all_results
+    
+
 # Gmail API Authentication
-def authenticate_gmail():
-    SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.modify']
+def authenticate_gmail(credentials_file):
+    SCOPES = [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.modify'
+    ]
     creds = None
-    if os.path.exists(GMAIL_CREDENTIALS_FILE):
-        logging.info("authenticating gmail with " + GMAIL_CREDENTIALS_FILE)
-        with open(GMAIL_CREDENTIALS_FILE, 'rb') as token:
+    if os.path.exists(credentials_file):
+        logging.info("authenticating gmail with " + credentials_file)
+        with open(credentials_file, 'rb') as token:
             creds = pickle.load(token)
-            # logging.info(creds)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            logging.info("authenticating gmail with" + GMAIL_CLIENT_SECRET_FILE)
             flow = InstalledAppFlow.from_client_secrets_file(
-                GMAIL_CLIENT_SECRET_FILE, SCOPES)
+                'gmail_client_secret.json', SCOPES
+            )
             creds = flow.run_local_server(port=8080)
-        with open(GMAIL_CREDENTIALS_FILE, 'wb') as token:
+        with open(credentials_file, 'wb') as token:
             pickle.dump(creds, token)
 
-    gmail = build('gmail', 'v1', credentials=creds)
-    logging.info("authenticated gmail")
-    return gmail
+    logging.info("authenticated with: " + credentials_file)
+    return build('gmail', 'v1', credentials=creds, cache_discovery=False)
 
 
-
-def check_gmail_mail():
+def check_gmail_mail(credentials_file):
     logging.info("checking gmail")
-    gmail = authenticate_gmail()
+    gmail = authenticate_gmail(credentials_file)
     results = []
 
     # Используем q="newer_than:1d is:unread" для фильтрации по письмам за последний день, которые не прочитаны
-    query = "newer_than:1d is:unread"
+    query = "newer_than:2d is:unread"
 
     try:
         # Получаем письма за последний день

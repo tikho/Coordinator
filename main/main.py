@@ -1,7 +1,7 @@
 from aiogram import Bot, Dispatcher, types
 import logging
 import asyncio
-from mail_checker import check_gmail_mail, check_yahoo_mail
+from mail_checker import check_all_gmail_accounts, check_gmail_mail, check_yahoo_mail
 from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardRemove
@@ -36,7 +36,7 @@ async def check_mails_task(bot: Bot, chat_id: int):
     while True:
         try:
 
-            gmail_results = check_gmail_mail()
+            gmail_results = check_all_gmail_accounts()
             yahoo_results = check_yahoo_mail()
 
             # Логика отправки сообщений в чат с кодами

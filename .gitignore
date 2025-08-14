@@ -1,5 +1,7 @@
 gmail_client_secret.json
 gmail_credentials.json
+gmail_credentials_alfavvidandneiro.json
+gmail_credentials_alfamarketingdepartment2022.json
 .env
 docker-compose.yml
 /docker-compose.yml
