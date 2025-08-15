@@ -15,7 +15,6 @@ from typing import Optional, Tuple
 import json, os, time
 import requests
 from config import OPENAI_API_KEY
-from gpt_call import analyze_email_with_ai
 import mailparser
 
 from config import (
@@ -194,8 +193,6 @@ def check_gmail_mail(credentials_file):
 
         # build anchors-only for AI
         anchors = "\n".join(f'<a href="{u}">{u}</a>' for u in links)
-
-        # ai = analyze_email_with_ai(plain, anchors)
 
         # Build human-visible plain text
         plain = plain if 'plain' in locals() and plain else (text_body or (html_to_visible_text(html_body) if html_body else ""))

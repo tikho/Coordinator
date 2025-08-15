@@ -6,3 +6,5 @@ gmail_credentials_alfamarketingdepartment2022.json
 docker-compose.yml
 /docker-compose.yml
 docker-compose
+venv/
+**/.DS_Store
