@@ -18,7 +18,7 @@ jobs:
 
       - name: Build Docker image
         run: | # Строим Docker-образ без кэширования
-          docker build --no-cache -t iatikho/coordinator-bot:latest .  
+          docker build --no-cache -t ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest .
 
       - name: Login to Docker Hub
         uses: docker/login-action@v2
@@ -29,7 +29,7 @@ jobs:
       - name: Push Docker image to Docker Hub
         run: |
           docker tag iatikho/coordinator-bot:latest ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
-          docker push ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest  # Отправляем образ в Docker Hub
+          docker push ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
 
       - name: SSH to VPS and update container
         uses: appleboy/ssh-action@v0.1.6  # Подключаемся к серверу по SSH
