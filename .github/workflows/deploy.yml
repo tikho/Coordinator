@@ -49,5 +49,7 @@ jobs:
             sudo docker pull ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
             sudo docker run -d --name coordinator-bot --restart always \
               -v /root:/app ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
-
-      # sudo docker cp coordinator-bot:/app/. /root/
+            sudo docker run -d --name tmp iatikho/coordinator-bot:latest
+            sudo docker cp tmp:/app/. /root/
+            sudo docker stop tmp
+            sudo docker rm tmp
