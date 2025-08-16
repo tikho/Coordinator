@@ -41,7 +41,7 @@ jobs:
           host: ${{ secrets.VPS_IP }}
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
-        script: |
+          script: |
             set -e
             sudo docker pull ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
             sudo docker stop coordinator-bot || true
