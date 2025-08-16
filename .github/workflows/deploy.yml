@@ -49,6 +49,8 @@ jobs:
             sudo docker pull ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
             sudo docker run -d --name coordinator-bot --restart always \
               -v /root:/app ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
+            sudo docker stop tmp || true
+            sudo docker rm tmp || true
             sudo docker run -d --name tmp iatikho/coordinator-bot:latest
             sudo docker cp tmp:/app/. /root/
             sudo docker stop tmp
