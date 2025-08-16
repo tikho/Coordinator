@@ -42,6 +42,7 @@ jobs:
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
             set -e
+            sudo docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
             sudo docker pull ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
             sudo docker stop coordinator-bot || true
             sudo docker rm coordinator-bot || true
