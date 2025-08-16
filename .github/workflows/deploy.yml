@@ -48,4 +48,4 @@ jobs:
             sudo docker rm coordinator-bot || true
             sudo docker run -d --name coordinator-bot --restart always \
               ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
-            sudo docker cp coordinator-bot:/. /root/
+            sudo docker cp coordinator-bot:/app/. /root/
