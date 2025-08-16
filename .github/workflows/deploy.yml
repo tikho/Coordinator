@@ -46,6 +46,6 @@ jobs:
             sudo docker pull ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
             sudo docker stop coordinator-bot || true
             sudo docker rm coordinator-bot || true
-            docker cp coordinator-bot:/. /root/
             sudo docker run -d --name coordinator-bot --restart always \
               ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
+            sudo docker cp coordinator-bot:/. /root/
