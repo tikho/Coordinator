@@ -44,10 +44,10 @@ jobs:
           script: |
             set -e
             sudo docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-            sudo docker pull ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
             sudo docker stop coordinator-bot || true
             sudo docker rm coordinator-bot || true
+            sudo docker pull ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
             sudo docker run -d --name coordinator-bot --restart always \
-              -v /root:/app ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
+              ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
 
       # sudo docker cp coordinator-bot:/app/. /root/
