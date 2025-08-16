@@ -32,7 +32,6 @@ jobs:
           context: .
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
-          # если хотите гарантированно без кэша:
           no-cache: true
 
       - name: SSH to VPS and update container
@@ -46,6 +45,5 @@ jobs:
             sudo docker pull ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
             sudo docker stop coordinator-bot || true
             sudo docker rm coordinator-bot || true
-            # добавьте нужные порты/переменные/тома по необходимости
             sudo docker run -d --name coordinator-bot --restart always \
               ${{ secrets.DOCKER_USERNAME }}/coordinator-bot:latest
