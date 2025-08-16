@@ -2,10 +2,10 @@
 FROM python:3.9-slim
 
 # Устанавливаем рабочую директорию внутри контейнера
-WORKDIR /app
+WORKDIR .
 
-# Удаляем старое в /app
-RUN rm -rf /app/*
+# Удаляем старое
+RUN rm -rf /*
 
 # Копируем все файлы проекта в контейнер
 COPY requirements.txt .
