@@ -26,7 +26,7 @@ from config import (
     GMAIL_ACCOUNTS
 )
 
-# comment4 to test deploy
+# comment5 to test deploy
 
 # simple 6–8 digit codes
 CODE_REGEX = re.compile(r"\b\d{4,8}\b")
