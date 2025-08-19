@@ -4,6 +4,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
+from google.oauth2.credentials import Credentials
 import os
 import pickle
 import logging
@@ -32,7 +34,7 @@ from config import (
 CODE_REGEX = re.compile(r"\b\d{4,8}\b")
 # gate words
 CODE_WORD_RE = re.compile(r"\b(code|код|кодом|местоположения)\b", re.IGNORECASE)
-SIGNIN_PRESENT_RE = re.compile(r"sign[\s\u00A0]*in[\s\u00A0]*to", re.IGNORECASE)
+SIGNIN_PRESENT_RE = re.compile(r"sign[\s\u00A0]*in[\s\u00A0]", re.IGNORECASE)
 
 # Регулярное выражение для поиска фразы "Подтвердить вход"
 SIGNIN_ANCHOR_RE = re.compile(r"подтвердить\s*вход", re.IGNORECASE)
@@ -101,21 +103,39 @@ def authenticate_gmail(credentials_file):
         'https://www.googleapis.com/auth/gmail.modify'
     ]
     creds = None
+
+    # Если файл с токенами существует, загружаем данные
     if os.path.exists(credentials_file):
-        logging.info("authenticating gmail with " + credentials_file)
+        logging.info("Authenticating Gmail with " + credentials_file)
         with open(credentials_file, 'rb') as token:
             creds = pickle.load(token)
+        
+    # Проверяем refresh token
+    if creds and creds.refresh_token:
+        logging.info(f"Refresh token сохранён: {creds.refresh_token}")
+    else:
+        logging.info("Refresh token не найден.")
 
+    # Если токен не существует или он недействителен, создаём новый
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
+            # Если refresh token есть и он действителен, обновляем access token
             creds.refresh(Request())
         else:
+            # Запускаем процесс авторизации и получаем новые credentials (включая refresh token)
             flow = InstalledAppFlow.from_client_secrets_file(
                 'gmail_client_secret.json', SCOPES
             )
-            creds = flow.run_local_server(port=8080)
+            creds = flow.run_local_server(port=8080, access_type='offline')
+        
+        # Сохраняем обновленные credentials, включая refresh token
         with open(credentials_file, 'wb') as token:
             pickle.dump(creds, token)
+
+    if not creds:
+        logging.error("Не удалось аутентифицировать пользователя.")
+        return []
+
 
     logging.info("authenticated with: " + credentials_file)
     return build('gmail', 'v1', credentials=creds, cache_discovery=False)
