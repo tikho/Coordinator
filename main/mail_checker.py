@@ -109,12 +109,6 @@ def authenticate_gmail(credentials_file):
         logging.info("Authenticating Gmail with " + credentials_file)
         with open(credentials_file, 'rb') as token:
             creds = pickle.load(token)
-        
-    # Проверяем refresh token
-    if creds and creds.refresh_token:
-        logging.info(f"Refresh token сохранён: {creds.refresh_token}")
-    else:
-        logging.info("Refresh token не найден.")
 
     # Если токен не существует или он недействителен, создаём новый
     if not creds or not creds.valid:
@@ -131,6 +125,12 @@ def authenticate_gmail(credentials_file):
         # Сохраняем обновленные credentials, включая refresh token
         with open(credentials_file, 'wb') as token:
             pickle.dump(creds, token)
+
+    # Проверяем refresh token
+    if creds and creds.refresh_token:
+        logging.info(f"Refresh token сохранён: {creds.refresh_token}")
+    else:
+        logging.info("Refresh token не найден.")
 
     if not creds:
         logging.error("Не удалось аутентифицировать пользователя.")
