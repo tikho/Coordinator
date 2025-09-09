@@ -63,7 +63,10 @@ APPROVED_COMPANIES = [
     "midjourney.com",
     "discord.com",
     "atlassian.com",
-    "gptunnel.ru"
+    "gptunnel.ru",
+    "zoom.us",
+    "clipdrop.co",
+    "ideogram.ai"
 ]
 
 
@@ -415,11 +418,14 @@ def extract_first_qp_href(html_body: str) -> Optional[str]:
     if not m:
         return None
     raw = m.group(2)
-    # decode percent-encoding once or twice; also try to pull embedded https URL
-    dec1 = unquote(raw)
-    dec2 = unquote(dec1)
-    u = EMBEDDED_URL_RE.search(dec2) or EMBEDDED_URL_RE.search(dec1) or EMBEDDED_URL_RE.search(raw)
-    return u.group(0) if u else None
+
+    # # decode percent-encoding once or twice; also try to pull embedded https URL
+    # dec1 = unquote(raw)
+    # dec2 = unquote(dec1)
+    # u = EMBEDDED_URL_RE.search(dec2) or EMBEDDED_URL_RE.search(dec1) or EMBEDDED_URL_RE.search(raw)
+    # return u.group(0) if u else None
+
+    return raw  # возвращаем оригинальный URL, как он есть (не декодируем)
 
 def find_signin_link_if_present(html_body: str, plain_text: str) -> Optional[Tuple[str, str]]:
     # If the letter mentions "Sign in to ..." anywhere, take first href from HTML
