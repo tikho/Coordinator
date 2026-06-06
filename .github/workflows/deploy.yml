@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main  # Запуск при пуше в основную ветку
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
